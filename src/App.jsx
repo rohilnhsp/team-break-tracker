@@ -6,19 +6,19 @@ const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Simulate the logged-in user (replace with auth in real deployment)
+// Simulated logged-in user ID (replace with auth in real deployment)
 const CURRENT_USER_ID = 1;
 
 function App() {
   const [members, setMembers] = useState([]);
   const [breaks, setBreaks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timer, setTimer] = useState(Date.now()); // live duration
+  const [timer, setTimer] = useState(Date.now()); // for live break duration
 
   useEffect(() => {
     loadData();
 
-    // Realtime listener
+    // Realtime listener for breaks table
     const channel = supabase
       .channel("breaks-updates")
       .on(
@@ -28,7 +28,7 @@ function App() {
       )
       .subscribe();
 
-    // Timer for live duration update
+    // Timer to update live break durations every second
     const interval = setInterval(() => setTimer(Date.now()), 1000);
 
     return () => {
@@ -64,15 +64,9 @@ function App() {
     if (!b) return "";
     const start = new Date(b.punch_in).getTime();
     const diff = Date.now() - start;
-    const h = Math.floor(diff / 3600000)
-      .toString()
-      .padStart(2, "0");
-    const m = Math.floor((diff % 3600000) / 60000)
-      .toString()
-      .padStart(2, "0");
-    const s = Math.floor((diff % 60000) / 1000)
-      .toString()
-      .padStart(2, "0");
+    const h = Math.floor(diff / 3600000).toString().padStart(2, "0");
+    const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, "0");
+    const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, "0");
     return `${h}:${m}:${s}`;
   }
 
@@ -93,6 +87,7 @@ function App() {
       .is("punch_out", null)
       .order("punch_in", { ascending: false })
       .limit(1);
+
     if (data && data.length > 0) {
       const breakId = data[0].id;
       const { error } = await supabase
@@ -100,6 +95,7 @@ function App() {
         .update({ punch_out: new Date().toISOString() })
         .eq("id", breakId)
         .select();
+
       if (error) console.error(error);
       else
         setBreaks((prev) =>
@@ -134,7 +130,7 @@ function App() {
 
     const { data } = await supabase
       .from("breaks")
-      .select("id,punch_in,punch_out,created_at,team_members(name,email)")
+      .select("id,punch_in,punch_out,created_at,team_members:member_id(name,email)")
       .gte("created_at", fromDate.toISOString())
       .order("created_at", { ascending: true });
 
@@ -243,7 +239,10 @@ function AddMemberForm({ onAdd }) {
   return (
     <div>
       <h2>Add New Member</h2>
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", gap: 8, alignItems: "center" }}
+      >
         <input
           placeholder="Name"
           value={name}
