@@ -6,14 +6,14 @@ const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Simulated logged-in user ID (replace with auth in real deployment)
-const CURRENT_USER_ID = 1;
+// Simulated admin login (replace with real auth if needed)
+const CURRENT_ADMIN_ID = 1; // admin member id in team_members table
 
 function App() {
   const [members, setMembers] = useState([]);
   const [breaks, setBreaks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timer, setTimer] = useState(Date.now()); // for live break duration
+  const [timer, setTimer] = useState(Date.now());
 
   useEffect(() => {
     loadData();
@@ -52,11 +52,26 @@ function App() {
     if (showLoading) setLoading(false);
   }
 
-  const currentUser = members.find((m) => m.id === CURRENT_USER_ID);
+  const currentUser = members.find((m) => m.id === CURRENT_ADMIN_ID);
   const isAdmin = currentUser?.is_admin;
 
   function isMemberOnBreak(id) {
     return breaks.some((b) => b.member_id === id && b.punch_out === null);
+  }
+
+  function formatUKTime(utcTime) {
+    if (!utcTime) return "";
+    const date = new Date(utcTime);
+    return date.toLocaleString("en-GB", {
+      timeZone: "Europe/London",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
   }
 
   function getBreakDuration(id) {
@@ -144,9 +159,9 @@ function App() {
         .map((r) => {
           const name = r.team_members?.name || "";
           const email = r.team_members?.email || "";
-          const punch_in = r.punch_in || "";
-          const punch_out = r.punch_out || "";
-          const created_at = r.created_at || "";
+          const punch_in = formatUKTime(r.punch_in);
+          const punch_out = formatUKTime(r.punch_out);
+          const created_at = formatUKTime(r.created_at);
           return `"${name}","${email}","${punch_in}","${punch_out}","${created_at}"`;
         })
         .join("\n");
@@ -205,6 +220,12 @@ function App() {
                 ) : (
                   <span style={{ color: "green" }}>Available</span>
                 )}
+              </div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                Punch In: {formatUKTime(breaks.find((b) => b.member_id === m.id)?.punch_in)}
+              </div>
+              <div style={{ fontSize: 12 }}>
+                Punch Out: {formatUKTime(breaks.find((b) => b.member_id === m.id)?.punch_out)}
               </div>
             </div>
           ))}
