@@ -14,10 +14,11 @@ export default function App() {
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const currentPath = window.location.pathname; // get URL path
+  const currentPath = window.location.pathname;
 
   useEffect(() => {
-    const sessionPromise = supabase.auth.getSession().then(({ data }) => {
+    // Check session
+    supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
     });
 
@@ -87,9 +88,23 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <form onSubmit={handleLogin} className="bg-white p-8 rounded shadow-md w-80">
           <h2 className="text-2xl mb-4 text-center font-bold">Admin Login</h2>
-          <input name="email" type="email" placeholder="Email" required className="border p-2 mb-3 w-full rounded" />
-          <input name="password" type="password" placeholder="Password" required className="border p-2 mb-4 w-full rounded" />
-          <button className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded w-full">Login</button>
+          <input
+            name="email"
+            type="email"
+            placeholder="Email"
+            required
+            className="border p-2 mb-3 w-full rounded"
+          />
+          <input
+            name="password"
+            type="password"
+            placeholder="Password"
+            required
+            className="border p-2 mb-4 w-full rounded"
+          />
+          <button className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded w-full">
+            Login
+          </button>
         </form>
       </div>
     );
@@ -98,13 +113,15 @@ export default function App() {
   // -------------------------------
   // ADMIN DASHBOARD PAGE
   if (currentPath === "/admin" && user) {
-    if (!isAdmin) return <p>You are not authorized to access this page.</p>;
+    if (!isAdmin) return <p className="p-6">You are not authorized to access this page.</p>;
 
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-          <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">Logout</button>
+          <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">
+            Logout
+          </button>
         </div>
         <p>Admin features go here: Add/Remove users, export data, etc.</p>
       </div>
@@ -114,22 +131,47 @@ export default function App() {
   // -------------------------------
   // USER DASHBOARD
   if (!user) {
-    // auto-login users could be handled here if needed
-    return <p>Please login via /admin (if admin) or use magic link if you implement it.</p>;
+    return (
+      <p className="p-6">
+        Please login via <a href="/admin" className="text-blue-600">Admin</a> if needed or use your user account.
+      </p>
+    );
   }
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Team Break Tracker</h1>
-        <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">Logout</button>
+        <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">
+          Logout
+        </button>
       </div>
 
       <div className="flex gap-4 mb-6">
-        <button onClick={() => handlePunch("punch_in")} className="bg-green-500 text-white px-4 py-2 rounded">Punch In</button>
-        <button onClick={() => handlePunch("punch_out")} className="bg-red-500 text-white px-4 py-2 rounded">Punch Out</button>
-        <button onClick={() => handlePunch("break_start")} className="bg-yellow-500 text-white px-4 py-2 rounded">Break Start</button>
-        <button onClick={() => handlePunch("break_end")} className="bg-blue-500 text-white px-4 py-2 rounded">Break End</button>
+        <button
+          onClick={() => handlePunch("punch_in")}
+          className="bg-green-500 text-white px-4 py-2 rounded"
+        >
+          Punch In
+        </button>
+        <button
+          onClick={() => handlePunch("punch_out")}
+          className="bg-red-500 text-white px-4 py-2 rounded"
+        >
+          Punch Out
+        </button>
+        <button
+          onClick={() => handlePunch("break_start")}
+          className="bg-yellow-500 text-white px-4 py-2 rounded"
+        >
+          Break Start
+        </button>
+        <button
+          onClick={() => handlePunch("break_end")}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          Break End
+        </button>
       </div>
 
       {loading ? (
@@ -148,7 +190,9 @@ export default function App() {
             {punches.map((p) => (
               <tr key={p.id}>
                 <td className="border p-2">{p.type.replace("_", " ")}</td>
-                <td className="border p-2">{dayjs(p.timestamp).tz("Europe/London").format("DD MMM YYYY, HH:mm")}</td>
+                <td className="border p-2">
+                  {dayjs(p.timestamp).tz("Europe/London").format("DD MMM YYYY, HH:mm")}
+                </td>
               </tr>
             ))}
           </tbody>
