@@ -1,320 +1,326 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
 
-const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
-function App() {
-  const [session, setSession] = useState(null);
-  const [members, setMembers] = useState([]);
-  const [breaks, setBreaks] = useState([]);
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+const UK_TZ = "Europe/London";
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [team, setTeam] = useState([]);
+  const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timer, setTimer] = useState(Date.now());
+  const [newMemberEmail, setNewMemberEmail] = useState("");
+  const [newMemberName, setNewMemberName] = useState("");
+  const [period, setPeriod] = useState("daily");
 
-  // Listen to auth state changes
+  // ---------- AUTH ----------
   useEffect(() => {
-    const getSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-    };
-    getSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess);
+    const session = supabase.auth.getSession().then(({ data }) => {
+      if (data?.session?.user) setUser(data.session.user);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load members and breaks when admin logged in
-  useEffect(() => {
-    if (!session) return;
-
-    const loadData = async () => {
-      setLoading(true);
-      const { data: membersData } = await supabase.from("team_members").select("*").order("name");
-      const { data: breaksData } = await supabase.from("breaks").select("*");
-      setMembers(membersData || []);
-      setBreaks(breaksData || []);
-      setLoading(false);
-    };
-
-    loadData();
-
-    // Realtime listener for breaks
-    const channel = supabase
-      .channel("breaks-updates")
-      .on("postgres_changes", { event: "*", schema: "public", table: "breaks" }, () => loadData(false))
-      .subscribe();
-
-    // Timer to update live durations every second
-    const interval = setInterval(() => setTimer(Date.now()), 1000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
-  }, [session]);
-
-  if (!session) return <Login />; // Show login if no session
-
-  return <Dashboard session={session} members={members} breaks={breaks} />;
-}
-
-// Login Page
-function Login() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
   const handleLogin = async (e) => {
     e.preventDefault();
+    const email = e.target.email.value;
+    const password = e.target.password.value;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert(error.message);
+    if (error) alert("Login failed: " + error.message);
   };
-
-  return (
-    <div style={{ padding: 20 }}>
-      <h2>Admin Login</h2>
-      <form style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 300 }} onSubmit={handleLogin}>
-        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <button type="submit">Login</button>
-      </form>
-    </div>
-  );
-}
-
-// Dashboard
-function Dashboard({ session, members, breaks }) {
-  const [loading, setLoading] = useState(false);
-  const [timer, setTimer] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setTimer(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setUser(null);
   };
 
-  function isMemberOnBreak(id) {
-    return breaks.some((b) => b.member_id === id && b.punch_out === null);
-  }
+  // ---------- DATA ----------
+  const fetchTeamData = async () => {
+    setLoading(true);
+    const { data: members } = await supabase.from("team_members").select("*").order("created_at");
+    setTeam(members || []);
+    const { data: records } = await supabase.from("attendance").select("*").order("created_at");
+    setAttendance(records || []);
+    setLoading(false);
+  };
 
-  function formatUKTime(utcTime) {
-    if (!utcTime) return "";
-    const date = new Date(utcTime);
-    return date.toLocaleString("en-GB", {
-      timeZone: "Europe/London",
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-  }
+  useEffect(() => {
+    if (user) fetchTeamData();
+  }, [user]);
 
-  function getBreakDuration(id) {
-    const b = breaks.find((b) => b.member_id === id && b.punch_out === null);
-    if (!b) return "";
-    const start = new Date(b.punch_in).getTime();
-    const diff = Date.now() - start;
-    const h = Math.floor(diff / 3600000).toString().padStart(2, "0");
-    const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, "0");
-    const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, "0");
-    return `${h}:${m}:${s}`;
-  }
-
-  async function punchIn(id) {
-    const { data, error } = await supabase.from("breaks").insert([{ member_id: id }]).select();
-    if (error) console.error(error);
-    else if (data && data.length > 0) setBreaks((prev) => [...prev, data[0]]);
-  }
-
-  async function punchOut(id) {
-    const { data } = await supabase
-      .from("breaks")
-      .select("*")
-      .eq("member_id", id)
-      .is("punch_out", null)
-      .order("punch_in", { ascending: false })
-      .limit(1);
-
-    if (data && data.length > 0) {
-      const breakId = data[0].id;
-      const { error } = await supabase
-        .from("breaks")
-        .update({ punch_out: new Date().toISOString() })
-        .eq("id", breakId)
-        .select();
-
-      if (error) console.error(error);
-      else
-        setBreaks((prev) =>
-          prev.map((b) => (b.id === breakId ? { ...b, punch_out: new Date().toISOString() } : b))
-        );
-    } else alert("No active break found for this user.");
-  }
-
-  async function addMember(name, email = "", isAdminFlag = false) {
-    if (!name.trim()) return alert("Enter a name");
-    const emailValue = email.trim() === "" ? null : email.trim();
-    const { error } = await supabase.from("team_members").insert([{ name, email: emailValue, is_admin: isAdminFlag }]);
+  // ---------- ADMIN ADD / REMOVE ----------
+  const addMember = async () => {
+    if (!newMemberEmail || !newMemberName) return alert("Enter name and email");
+    const { error } = await supabase
+      .from("team_members")
+      .insert([{ email: newMemberEmail, full_name: newMemberName, role: "member" }]);
     if (error) alert(error.message);
-    else window.location.reload();
-  }
+    else {
+      alert("Member added!");
+      setNewMemberEmail("");
+      setNewMemberName("");
+      fetchTeamData();
+    }
+  };
 
-  async function removeMember(id) {
-    if (!window.confirm("Are you sure you want to remove this user?")) return;
-    const { error } = await supabase.from("team_members").delete().eq("id", id);
-    if (error) alert(error.message);
-    else window.location.reload();
-  }
+  const removeMember = async (id) => {
+    if (!window.confirm("Remove this member?")) return;
+    await supabase.from("team_members").delete().eq("id", id);
+    fetchTeamData();
+  };
 
-  async function exportCSV(period = "daily") {
-    let fromDate = new Date();
-    if (period === "weekly") fromDate.setDate(fromDate.getDate() - 7);
-    if (period === "monthly") fromDate.setMonth(fromDate.getMonth() - 1);
+  // ---------- PUNCH IN / OUT ----------
+  const togglePunch = async (member) => {
+    const openRecord = attendance.find(
+      (a) => a.member_id === member.id && !a.punch_out
+    );
 
-    const { data } = await supabase
-      .from("breaks")
-      .select("id,punch_in,punch_out,created_at,team_members:member_id(name,email)")
-      .gte("created_at", fromDate.toISOString())
-      .order("created_at", { ascending: true });
+    if (openRecord) {
+      // punch out
+      await supabase
+        .from("attendance")
+        .update({ punch_out: dayjs().tz(UK_TZ).toISOString() })
+        .eq("id", openRecord.id);
+    } else {
+      // punch in
+      await supabase
+        .from("attendance")
+        .insert([
+          { member_id: member.id, punch_in: dayjs().tz(UK_TZ).toISOString() },
+        ]);
+    }
+    fetchTeamData();
+  };
 
-    if (!data || data.length === 0) return alert("No data to export");
+  // ---------- BREAK DURATION ----------
+  const getBreakDuration = (record) => {
+    if (!record.punch_in) return "";
+    const punchIn = dayjs(record.punch_in).tz(UK_TZ);
+    const punchOut = record.punch_out
+      ? dayjs(record.punch_out).tz(UK_TZ)
+      : dayjs().tz(UK_TZ);
+    const diff = punchOut.diff(punchIn, "minute");
+    const hrs = Math.floor(diff / 60);
+    const mins = diff % 60;
+    return `${hrs}h ${mins}m`;
+  };
 
-    const header = ["Name", "Email", "Punch In", "Punch Out", "Created At"];
-    const csv =
-      header.join(",") +
-      "\n" +
-      data
-        .map((r) => {
-          const name = r.team_members?.name || "";
-          const email = r.team_members?.email || "";
-          const punch_in = formatUKTime(r.punch_in);
-          const punch_out = formatUKTime(r.punch_out);
-          const created_at = formatUKTime(r.created_at);
-          return `"${name}","${email}","${punch_in}","${punch_out}","${created_at}"`;
-        })
-        .join("\n");
+  // ---------- EXPORT ----------
+  const exportData = async () => {
+    const { data, error } = await supabase
+      .from("attendance")
+      .select(
+        `
+        id,
+        punch_in,
+        punch_out,
+        member_id,
+        team_members!inner(full_name, email)
+      `
+      );
+    if (error || !data?.length) {
+      alert("No data to export or error occurred.");
+      return;
+    }
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const csvRows = [
+      ["Name", "Email", "Punch In (UK)", "Punch Out (UK)", "Duration"],
+      ...data.map((r) => [
+        r.team_members.full_name,
+        r.team_members.email,
+        dayjs(r.punch_in).tz(UK_TZ).format("DD/MM/YYYY HH:mm"),
+        r.punch_out
+          ? dayjs(r.punch_out).tz(UK_TZ).format("DD/MM/YYYY HH:mm")
+          : "",
+        getBreakDuration(r),
+      ]),
+    ];
+
+    const csv = csvRows.map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `breaks_${period}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `attendance_${period}_${dayjs()
+      .tz(UK_TZ)
+      .format("YYYYMMDD_HHmm")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // ---------- RENDER ----------
+  if (!user) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <form
+          onSubmit={handleLogin}
+          className="bg-white p-8 rounded-2xl shadow w-80"
+        >
+          <h2 className="text-xl font-bold mb-4 text-center">Admin Login</h2>
+          <input
+            type="email"
+            name="email"
+            placeholder="Email"
+            className="border p-2 w-full mb-3 rounded"
+            required
+          />
+          <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            className="border p-2 w-full mb-4 rounded"
+            required
+          />
+          <button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded w-full"
+          >
+            Login
+          </button>
+        </form>
+      </div>
+    );
   }
 
-  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
+  if (loading)
+    return (
+      <div className="flex h-screen items-center justify-center text-gray-600">
+        Loading...
+      </div>
+    );
+
+  const currentUser = team.find((m) => m.email === user.email);
+  const isAdmin = currentUser?.role === "admin";
 
   return (
-    <div style={{ fontFamily: "Arial", padding: 20, maxWidth: 1000, margin: "auto" }}>
-      <button onClick={handleLogout} style={{ marginBottom: 20 }}>
-        Logout
-      </button>
-      <h1>Team Break Tracker (Admin)</h1>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Team Break Tracker</h1>
+        <button
+          onClick={handleLogout}
+          className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+        >
+          Logout
+        </button>
+      </div>
 
-      <div style={{ marginBottom: 20 }}>
-        <h2>Team Members</h2>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-          {members.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                border: "1px solid #ccc",
-                padding: 10,
-                borderRadius: 8,
-                width: 260,
-              }}
+      {isAdmin && (
+        <div className="bg-white p-4 rounded-xl shadow mb-6">
+          <h2 className="font-semibold mb-2">Add Team Member</h2>
+          <div className="flex gap-2 mb-3">
+            <input
+              placeholder="Full name"
+              value={newMemberName}
+              onChange={(e) => setNewMemberName(e.target.value)}
+              className="border p-2 rounded flex-1"
+            />
+            <input
+              placeholder="Email"
+              value={newMemberEmail}
+              onChange={(e) => setNewMemberEmail(e.target.value)}
+              className="border p-2 rounded flex-1"
+            />
+            <button
+              onClick={addMember}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
             >
-              <strong>{m.name}</strong>
-              <div style={{ fontSize: 12, color: "#666" }}>{m.email || "-"}</div>
-              <div style={{ marginTop: 8 }}>
-                {isMemberOnBreak(m.id) ? (
-                  <button onClick={() => punchOut(m.id)}>Punch Out</button>
-                ) : (
-                  <button onClick={() => punchIn(m.id)}>Punch In</button>
-                )}
-                <button
-                  onClick={() => removeMember(m.id)}
-                  style={{ marginLeft: 8, backgroundColor: "#f44336", color: "#fff" }}
-                >
-                  Remove
-                </button>
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12 }}>
-                Status:{" "}
-                {isMemberOnBreak(m.id) ? (
-                  <span style={{ color: "red" }}>On Break ({getBreakDuration(m.id)})</span>
-                ) : (
-                  <span style={{ color: "green" }}>Available</span>
-                )}
-              </div>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                Punch In: {formatUKTime(breaks.find((b) => b.member_id === m.id)?.punch_in)}
-              </div>
-              <div style={{ fontSize: 12 }}>
-                Punch Out: {formatUKTime(breaks.find((b) => b.member_id === m.id)?.punch_out)}
-              </div>
-            </div>
-          ))}
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h2 className="font-semibold mb-4">Team Members</h2>
+        <table className="w-full text-sm border">
+          <thead>
+            <tr className="bg-gray-100 text-left">
+              <th className="p-2">Name</th>
+              <th className="p-2">Email</th>
+              <th className="p-2">Status</th>
+              <th className="p-2">Duration</th>
+              <th className="p-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {team.map((member) => {
+              const record = attendance.find(
+                (a) => a.member_id === member.id && !a.punch_out
+              );
+              return (
+                <tr key={member.id} className="border-t">
+                  <td className="p-2">{member.full_name}</td>
+                  <td className="p-2">{member.email}</td>
+                  <td className="p-2">
+                    {record ? (
+                      <span className="text-green-600 font-medium">On Break</span>
+                    ) : (
+                      <span className="text-gray-500">Available</span>
+                    )}
+                  </td>
+                  <td className="p-2">
+                    {record ? getBreakDuration(record) : "-"}
+                  </td>
+                  <td className="p-2 text-right">
+                    <button
+                      onClick={() => togglePunch(member)}
+                      className={`px-3 py-1 rounded ${
+                        record
+                          ? "bg-yellow-500 text-white hover:bg-yellow-600"
+                          : "bg-blue-600 text-white hover:bg-blue-700"
+                      }`}
+                    >
+                      {record ? "Punch Out" : "Punch In"}
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => removeMember(member.id)}
+                        className="ml-2 px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-6">
+        <h2 className="font-semibold mb-2">Export Attendance Data</h2>
+        <div className="flex gap-2 items-center">
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="border p-2 rounded"
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <button
+            onClick={exportData}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
+          >
+            Export CSV
+          </button>
         </div>
       </div>
-
-      <AddMemberForm onAdd={addMember} />
-
-      <div style={{ marginTop: 20 }}>
-        <h2>Export Data</h2>
-        <button onClick={() => exportCSV("daily")}>Export Daily</button>
-        <button onClick={() => exportCSV("weekly")}>Export Weekly</button>
-        <button onClick={() => exportCSV("monthly")}>Export Monthly</button>
-      </div>
     </div>
   );
 }
-
-// Add Member Form
-function AddMemberForm({ onAdd }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [isAdminFlag, setIsAdminFlag] = useState(false);
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    onAdd(name, email, isAdminFlag);
-    setName("");
-    setEmail("");
-    setIsAdminFlag(false);
-  }
-
-  return (
-    <div style={{ marginTop: 20 }}>
-      <h2>Add New Member</h2>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", gap: 8, alignItems: "center" }}
-      >
-        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <label>
-          <input type="checkbox" checked={isAdminFlag} onChange={(e) => setIsAdminFlag(e.target.checked)} /> Admin
-        </label>
-        <button type="submit">Add</button>
-      </form>
-    </div>
-  );
-}
-
-export default App;
