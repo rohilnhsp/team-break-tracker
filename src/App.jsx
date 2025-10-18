@@ -6,11 +6,14 @@ const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Simulate the logged-in user (replace with auth in real deployment)
+const CURRENT_USER_ID = 1;
+
 function App() {
   const [members, setMembers] = useState([]);
   const [breaks, setBreaks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timer, setTimer] = useState(Date.now()); // for live duration
+  const [timer, setTimer] = useState(Date.now()); // live duration
 
   useEffect(() => {
     loadData();
@@ -25,7 +28,7 @@ function App() {
       )
       .subscribe();
 
-    // Timer to update durations every second
+    // Timer for live duration update
     const interval = setInterval(() => setTimer(Date.now()), 1000);
 
     return () => {
@@ -36,15 +39,21 @@ function App() {
 
   async function loadData(showLoading = true) {
     if (showLoading) setLoading(true);
+
     const { data: membersData } = await supabase
       .from("team_members")
       .select("*")
       .order("name");
+
     const { data: breaksData } = await supabase.from("breaks").select("*");
+
     setMembers(membersData || []);
     setBreaks(breaksData || []);
     if (showLoading) setLoading(false);
   }
+
+  const currentUser = members.find((m) => m.id === CURRENT_USER_ID);
+  const isAdmin = currentUser?.is_admin;
 
   function isMemberOnBreak(id) {
     return breaks.some((b) => b.member_id === id && b.punch_out === null);
@@ -68,7 +77,10 @@ function App() {
   }
 
   async function punchIn(id) {
-    const { data, error } = await supabase.from("breaks").insert([{ member_id: id }]).select();
+    const { data, error } = await supabase
+      .from("breaks")
+      .insert([{ member_id: id }])
+      .select();
     if (error) console.error(error);
     else if (data && data.length > 0) setBreaks((prev) => [...prev, data[0]]);
   }
@@ -98,12 +110,12 @@ function App() {
     } else alert("No active break found for this user.");
   }
 
-  async function addMember(name, email = "", isAdmin = false) {
+  async function addMember(name, email = "", isAdminFlag = false) {
     if (!name.trim()) return alert("Enter a name");
     const emailValue = email.trim() === "" ? null : email.trim();
     const { error } = await supabase
       .from("team_members")
-      .insert([{ name, email: emailValue, is_admin: isAdmin }]);
+      .insert([{ name, email: emailValue, is_admin: isAdminFlag }]);
     if (error) alert(error.message);
     else loadData(false);
   }
@@ -122,21 +134,25 @@ function App() {
 
     const { data } = await supabase
       .from("breaks")
-      .select("member_id,punch_in,punch_out,created_at")
+      .select("id,punch_in,punch_out,created_at,team_members(name,email)")
       .gte("created_at", fromDate.toISOString())
       .order("created_at", { ascending: true });
-    if (!data) return alert("No data to export");
 
-    const header = ["member_id", "punch_in", "punch_out", "created_at"];
+    if (!data || data.length === 0) return alert("No data to export");
+
+    const header = ["Name", "Email", "Punch In", "Punch Out", "Created At"];
     const csv =
       header.join(",") +
       "\n" +
       data
-        .map((r) =>
-          header
-            .map((h) => `"${(r[h] || "").toString().replace(/"/g, '""')}"`)
-            .join(",")
-        )
+        .map((r) => {
+          const name = r.team_members?.name || "";
+          const email = r.team_members?.email || "";
+          const punch_in = r.punch_in || "";
+          const punch_out = r.punch_out || "";
+          const created_at = r.created_at || "";
+          return `"${name}","${email}","${punch_in}","${punch_out}","${created_at}"`;
+        })
         .join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -164,7 +180,7 @@ function App() {
                 border: "1px solid #ccc",
                 padding: 10,
                 borderRadius: 8,
-                width: 250,
+                width: 260,
               }}
             >
               <strong>{m.name}</strong>
@@ -175,12 +191,14 @@ function App() {
                 ) : (
                   <button onClick={() => punchIn(m.id)}>Punch In</button>
                 )}
-                <button
-                  onClick={() => removeMember(m.id)}
-                  style={{ marginLeft: 8, backgroundColor: "#f44336", color: "#fff" }}
-                >
-                  Remove
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => removeMember(m.id)}
+                    style={{ marginLeft: 8, backgroundColor: "#f44336", color: "#fff" }}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
               <div style={{ marginTop: 6, fontSize: 12 }}>
                 Status:{" "}
@@ -197,7 +215,7 @@ function App() {
         </div>
       </div>
 
-      <AddMemberForm onAdd={addMember} />
+      {isAdmin && <AddMemberForm onAdd={addMember} />}
 
       <div style={{ marginTop: 20 }}>
         <h2>Export Data</h2>
@@ -212,18 +230,20 @@ function App() {
 function AddMemberForm({ onAdd }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [isAdminFlag, setIsAdminFlag] = useState(false);
 
   function handleSubmit(e) {
     e.preventDefault();
-    onAdd(name, email);
+    onAdd(name, email, isAdminFlag);
     setName("");
     setEmail("");
+    setIsAdminFlag(false);
   }
 
   return (
     <div>
       <h2>Add New Member</h2>
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           placeholder="Name"
           value={name}
@@ -234,6 +254,14 @@ function AddMemberForm({ onAdd }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
+        <label>
+          <input
+            type="checkbox"
+            checked={isAdminFlag}
+            onChange={(e) => setIsAdminFlag(e.target.checked)}
+          />{" "}
+          Admin
+        </label>
         <button type="submit">Add</button>
       </form>
     </div>
