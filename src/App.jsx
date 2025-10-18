@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Make sure you’ll add these in Vercel Environment Variables later
+// ✅ Set these environment variables in Vercel or .env.local
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
@@ -15,7 +15,7 @@ function App() {
   useEffect(() => {
     loadData();
 
-    // realtime listener for changes
+    // Realtime listener for breaks table
     const channel = supabase
       .channel("breaks-updates")
       .on(
@@ -52,24 +52,46 @@ function App() {
   }
 
   async function punchIn(id) {
-    await supabase.from("breaks").insert([{ member_id: id }]);
+    const { data, error } = await supabase
+      .from("breaks")
+      .insert([{ member_id: id }])
+      .select();
+
+    if (error) {
+      console.error(error);
+    } else if (data && data.length > 0) {
+      // update local state instantly
+      setBreaks((prev) => [...prev, data[0]]);
+    }
   }
 
   async function punchOut(id) {
     const { data } = await supabase
       .from("breaks")
-      .select("id")
+      .select("*")
       .eq("member_id", id)
       .is("punch_out", null)
       .order("punch_in", { ascending: false })
       .limit(1);
 
     if (data && data.length > 0) {
+      const breakId = data[0].id;
       const { error } = await supabase
         .from("breaks")
         .update({ punch_out: new Date().toISOString() })
-        .eq("id", data[0].id);
-      if (error) console.error(error);
+        .eq("id", breakId)
+        .select();
+
+      if (error) {
+        console.error(error);
+      } else {
+        // update local state instantly
+        setBreaks((prev) =>
+          prev.map((b) =>
+            b.id === breakId ? { ...b, punch_out: new Date().toISOString() } : b
+          )
+        );
+      }
     } else {
       alert("No active break found for this user.");
     }
@@ -123,7 +145,14 @@ function App() {
   if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
 
   return (
-    <div style={{ fontFamily: "Arial", padding: 20, maxWidth: 1000, margin: "auto" }}>
+    <div
+      style={{
+        fontFamily: "Arial",
+        padding: 20,
+        maxWidth: 1000,
+        margin: "auto",
+      }}
+    >
       <h1>Team Break Tracker</h1>
       <div style={{ marginBottom: 20 }}>
         <h2>Team Members</h2>
