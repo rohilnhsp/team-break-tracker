@@ -99,9 +99,12 @@ function App() {
 
   async function addMember(name, email = "", isAdmin = false) {
     if (!name.trim()) return alert("Enter a name");
+    // Use NULL if email is empty to avoid UNIQUE constraint error
+    const emailValue = email.trim() === "" ? null : email.trim();
+
     const { error } = await supabase
       .from("team_members")
-      .insert([{ name, email, is_admin: isAdmin }]);
+      .insert([{ name, email: emailValue, is_admin: isAdmin }]);
     if (error) alert(error.message);
     else loadData(false);
   }
