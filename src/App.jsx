@@ -14,6 +14,8 @@ export default function App() {
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const currentPath = window.location.pathname; // get URL path
+
   useEffect(() => {
     const sessionPromise = supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
@@ -27,7 +29,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user) checkAdmin();
+    if (user && currentPath === "/admin") checkAdmin();
   }, [user]);
 
   async function checkAdmin() {
@@ -78,7 +80,9 @@ export default function App() {
     if (user) loadPunches();
   }, [user]);
 
-  if (!user) {
+  // -------------------------------
+  // ADMIN LOGIN PAGE
+  if (currentPath === "/admin" && !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <form onSubmit={handleLogin} className="bg-white p-8 rounded shadow-md w-80">
@@ -89,6 +93,29 @@ export default function App() {
         </form>
       </div>
     );
+  }
+
+  // -------------------------------
+  // ADMIN DASHBOARD PAGE
+  if (currentPath === "/admin" && user) {
+    if (!isAdmin) return <p>You are not authorized to access this page.</p>;
+
+    return (
+      <div className="p-6 max-w-3xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+          <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">Logout</button>
+        </div>
+        <p>Admin features go here: Add/Remove users, export data, etc.</p>
+      </div>
+    );
+  }
+
+  // -------------------------------
+  // USER DASHBOARD
+  if (!user) {
+    // auto-login users could be handled here if needed
+    return <p>Please login via /admin (if admin) or use magic link if you implement it.</p>;
   }
 
   return (
