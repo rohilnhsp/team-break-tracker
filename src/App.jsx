@@ -1,59 +1,108 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Simulated admin login (replace with real auth if needed)
-const CURRENT_ADMIN_ID = 1; // admin member id in team_members table
-
 function App() {
+  const [session, setSession] = useState(null);
   const [members, setMembers] = useState([]);
   const [breaks, setBreaks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timer, setTimer] = useState(Date.now());
 
+  // Listen to auth state changes
   useEffect(() => {
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+    };
+    getSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // Load members and breaks when admin logged in
+  useEffect(() => {
+    if (!session) return;
+
+    const loadData = async () => {
+      setLoading(true);
+      const { data: membersData } = await supabase.from("team_members").select("*").order("name");
+      const { data: breaksData } = await supabase.from("breaks").select("*");
+      setMembers(membersData || []);
+      setBreaks(breaksData || []);
+      setLoading(false);
+    };
+
     loadData();
 
-    // Realtime listener for breaks table
+    // Realtime listener for breaks
     const channel = supabase
       .channel("breaks-updates")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "breaks" },
-        () => loadData(false)
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "breaks" }, () => loadData(false))
       .subscribe();
 
-    // Timer to update live break durations every second
+    // Timer to update live durations every second
     const interval = setInterval(() => setTimer(Date.now()), 1000);
 
     return () => {
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
+  }, [session]);
+
+  if (!session) return <Login />; // Show login if no session
+
+  return <Dashboard session={session} members={members} breaks={breaks} />;
+}
+
+// Login Page
+function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert(error.message);
+  };
+
+  return (
+    <div style={{ padding: 20 }}>
+      <h2>Admin Login</h2>
+      <form style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 300 }} onSubmit={handleLogin}>
+        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        <button type="submit">Login</button>
+      </form>
+    </div>
+  );
+}
+
+// Dashboard
+function Dashboard({ session, members, breaks }) {
+  const [loading, setLoading] = useState(false);
+  const [timer, setTimer] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setTimer(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  async function loadData(showLoading = true) {
-    if (showLoading) setLoading(true);
-
-    const { data: membersData } = await supabase
-      .from("team_members")
-      .select("*")
-      .order("name");
-
-    const { data: breaksData } = await supabase.from("breaks").select("*");
-
-    setMembers(membersData || []);
-    setBreaks(breaksData || []);
-    if (showLoading) setLoading(false);
-  }
-
-  const currentUser = members.find((m) => m.id === CURRENT_ADMIN_ID);
-  const isAdmin = currentUser?.is_admin;
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   function isMemberOnBreak(id) {
     return breaks.some((b) => b.member_id === id && b.punch_out === null);
@@ -86,10 +135,7 @@ function App() {
   }
 
   async function punchIn(id) {
-    const { data, error } = await supabase
-      .from("breaks")
-      .insert([{ member_id: id }])
-      .select();
+    const { data, error } = await supabase.from("breaks").insert([{ member_id: id }]).select();
     if (error) console.error(error);
     else if (data && data.length > 0) setBreaks((prev) => [...prev, data[0]]);
   }
@@ -114,9 +160,7 @@ function App() {
       if (error) console.error(error);
       else
         setBreaks((prev) =>
-          prev.map((b) =>
-            b.id === breakId ? { ...b, punch_out: new Date().toISOString() } : b
-          )
+          prev.map((b) => (b.id === breakId ? { ...b, punch_out: new Date().toISOString() } : b))
         );
     } else alert("No active break found for this user.");
   }
@@ -124,18 +168,16 @@ function App() {
   async function addMember(name, email = "", isAdminFlag = false) {
     if (!name.trim()) return alert("Enter a name");
     const emailValue = email.trim() === "" ? null : email.trim();
-    const { error } = await supabase
-      .from("team_members")
-      .insert([{ name, email: emailValue, is_admin: isAdminFlag }]);
+    const { error } = await supabase.from("team_members").insert([{ name, email: emailValue, is_admin: isAdminFlag }]);
     if (error) alert(error.message);
-    else loadData(false);
+    else window.location.reload();
   }
 
   async function removeMember(id) {
     if (!window.confirm("Are you sure you want to remove this user?")) return;
     const { error } = await supabase.from("team_members").delete().eq("id", id);
     if (error) alert(error.message);
-    else loadData(false);
+    else window.location.reload();
   }
 
   async function exportCSV(period = "daily") {
@@ -179,7 +221,10 @@ function App() {
 
   return (
     <div style={{ fontFamily: "Arial", padding: 20, maxWidth: 1000, margin: "auto" }}>
-      <h1>Team Break Tracker</h1>
+      <button onClick={handleLogout} style={{ marginBottom: 20 }}>
+        Logout
+      </button>
+      <h1>Team Break Tracker (Admin)</h1>
 
       <div style={{ marginBottom: 20 }}>
         <h2>Team Members</h2>
@@ -202,21 +247,17 @@ function App() {
                 ) : (
                   <button onClick={() => punchIn(m.id)}>Punch In</button>
                 )}
-                {isAdmin && (
-                  <button
-                    onClick={() => removeMember(m.id)}
-                    style={{ marginLeft: 8, backgroundColor: "#f44336", color: "#fff" }}
-                  >
-                    Remove
-                  </button>
-                )}
+                <button
+                  onClick={() => removeMember(m.id)}
+                  style={{ marginLeft: 8, backgroundColor: "#f44336", color: "#fff" }}
+                >
+                  Remove
+                </button>
               </div>
               <div style={{ marginTop: 6, fontSize: 12 }}>
                 Status:{" "}
                 {isMemberOnBreak(m.id) ? (
-                  <span style={{ color: "red" }}>
-                    On Break ({getBreakDuration(m.id)})
-                  </span>
+                  <span style={{ color: "red" }}>On Break ({getBreakDuration(m.id)})</span>
                 ) : (
                   <span style={{ color: "green" }}>Available</span>
                 )}
@@ -232,7 +273,7 @@ function App() {
         </div>
       </div>
 
-      {isAdmin && <AddMemberForm onAdd={addMember} />}
+      <AddMemberForm onAdd={addMember} />
 
       <div style={{ marginTop: 20 }}>
         <h2>Export Data</h2>
@@ -244,6 +285,7 @@ function App() {
   );
 }
 
+// Add Member Form
 function AddMemberForm({ onAdd }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -258,29 +300,16 @@ function AddMemberForm({ onAdd }) {
   }
 
   return (
-    <div>
+    <div style={{ marginTop: 20 }}>
       <h2>Add New Member</h2>
       <form
         onSubmit={handleSubmit}
         style={{ display: "flex", gap: 8, alignItems: "center" }}
       >
-        <input
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          placeholder="Email (optional)"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
         <label>
-          <input
-            type="checkbox"
-            checked={isAdminFlag}
-            onChange={(e) => setIsAdminFlag(e.target.checked)}
-          />{" "}
-          Admin
+          <input type="checkbox" checked={isAdminFlag} onChange={(e) => setIsAdminFlag(e.target.checked)} /> Admin
         </label>
         <button type="submit">Add</button>
       </form>
