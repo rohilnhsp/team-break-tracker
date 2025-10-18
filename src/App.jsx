@@ -14,9 +14,8 @@ export default function App() {
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Listen to auth changes
   useEffect(() => {
-    const session = supabase.auth.getSession().then(({ data }) => {
+    const sessionPromise = supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
     });
 
@@ -24,9 +23,7 @@ export default function App() {
       setUser(session?.user ?? null);
     });
 
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -39,7 +36,6 @@ export default function App() {
       .select("is_admin")
       .eq("auth_id", user.id)
       .single();
-
     if (!error && data?.is_admin) setIsAdmin(true);
   }
 
@@ -47,7 +43,6 @@ export default function App() {
     e.preventDefault();
     const email = e.target.email.value;
     const password = e.target.password.value;
-
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) alert(error.message);
   }
@@ -62,7 +57,7 @@ export default function App() {
     const { error } = await supabase.from("punch_records").insert({
       user_id: user.id,
       type,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
     if (error) alert("Error punching: " + error.message);
     else loadPunches();
@@ -75,7 +70,6 @@ export default function App() {
       .select("*")
       .eq("user_id", user.id)
       .order("timestamp", { ascending: false });
-
     if (!error) setPunches(data);
     setLoading(false);
   }
@@ -101,24 +95,14 @@ export default function App() {
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Team Break Tracker</h1>
-        <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">
-          Logout
-        </button>
+        <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded">Logout</button>
       </div>
 
       <div className="flex gap-4 mb-6">
-        <button onClick={() => handlePunch("punch_in")} className="bg-green-500 text-white px-4 py-2 rounded">
-          Punch In
-        </button>
-        <button onClick={() => handlePunch("punch_out")} className="bg-red-500 text-white px-4 py-2 rounded">
-          Punch Out
-        </button>
-        <button onClick={() => handlePunch("break_start")} className="bg-yellow-500 text-white px-4 py-2 rounded">
-          Break Start
-        </button>
-        <button onClick={() => handlePunch("break_end")} className="bg-blue-500 text-white px-4 py-2 rounded">
-          Break End
-        </button>
+        <button onClick={() => handlePunch("punch_in")} className="bg-green-500 text-white px-4 py-2 rounded">Punch In</button>
+        <button onClick={() => handlePunch("punch_out")} className="bg-red-500 text-white px-4 py-2 rounded">Punch Out</button>
+        <button onClick={() => handlePunch("break_start")} className="bg-yellow-500 text-white px-4 py-2 rounded">Break Start</button>
+        <button onClick={() => handlePunch("break_end")} className="bg-blue-500 text-white px-4 py-2 rounded">Break End</button>
       </div>
 
       {loading ? (
