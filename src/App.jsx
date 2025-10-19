@@ -8,13 +8,8 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        {/* Public dashboard, no login required */}
         <Route path="/" element={<Dashboard />} />
-
-        {/* Admin login page */}
         <Route path="/admin" element={<AdminLogin />} />
-
-        {/* Admin panel, protected route */}
         <Route path="/admin/panel" element={<AdminPanel />} />
       </Routes>
     </Router>
